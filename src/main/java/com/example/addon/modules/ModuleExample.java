@@ -10,10 +10,13 @@ import meteordevelopment.meteorclient.utils.player.Rotations;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.block.Block;
+import net.minecraft.block.BlockState;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
+import net.minecraft.util.math.Vec3d;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 
 public class ModuleExample extends Module {
@@ -21,127 +24,72 @@ public class ModuleExample extends Module {
     private final SettingGroup sgRender = settings.createGroup("Render");
     private final SettingGroup sgWhitelist = settings.createGroup("Whitelist");
 
-    // --- General Settings ---
-    private final Setting<Integer> bpt = sgGeneral.add(new IntSetting.Builder()
-        .name("blocks-per-tick")
-        .description("How many blocks to click every tick.")
-        .defaultValue(1)
-        .min(1)
-        .sliderMax(20)
-        .build()
-    );
+    private final Setting<Integer> bpt = sgGeneral.add(new IntSetting.Builder().name("blocks-per-tick").defaultValue(5).min(1).sliderMax(100).build());
+    private final Setting<Boolean> rotate = sgGeneral.add(new BoolSetting.Builder().name("rotate").defaultValue(false).build());
+    private final Setting<Integer> hRadius = sgGeneral.add(new IntSetting.Builder().name("horizontal-radius").defaultValue(4).build());
+    private final Setting<Integer> vUp = sgGeneral.add(new IntSetting.Builder().name("vertical-up").defaultValue(3).build());
+    private final Setting<Integer> vDown = sgGeneral.add(new IntSetting.Builder().name("vertical-down").defaultValue(1).build());
+    private final Setting<List<Block>> whitelist = sgWhitelist.add(new BlockListSetting.Builder().name("blocks").build());
+    private final Setting<Boolean> render = sgRender.add(new BoolSetting.Builder().name("render").defaultValue(true).build());
+    private final Setting<SettingColor> sideColor = sgRender.add(new ColorSetting.Builder().name("side-color").defaultValue(new SettingColor(255, 0, 0, 75)).build());
+    private final Setting<SettingColor> lineColor = sgRender.add(new ColorSetting.Builder().name("line-color").defaultValue(new SettingColor(255, 0, 0, 255)).build());
 
-    private final Setting<Boolean> rotate = sgGeneral.add(new BoolSetting.Builder()
-        .name("rotate")
-        .description("Face the block before clicking (helps bypass some anti-cheats).")
-        .defaultValue(true)
-        .build()
-    );
-
-    private final Setting<Integer> horizontalRadius = sgGeneral.add(new IntSetting.Builder()
-        .name("horizontal-radius")
-        .description("How far left, right, forward, and back to reach.")
-        .defaultValue(4)
-        .min(1)
-        .build()
-    );
-
-    private final Setting<Integer> verticalUp = sgGeneral.add(new IntSetting.Builder()
-        .name("vertical-up")
-        .description("How many blocks above your feet to reach.")
-        .defaultValue(3)
-        .min(0)
-        .build()
-    );
-
-    private final Setting<Integer> verticalDown = sgGeneral.add(new IntSetting.Builder()
-        .name("vertical-down")
-        .description("How many blocks below your feet to reach.")
-        .defaultValue(1)
-        .min(0)
-        .build()
-    );
-
-    // --- Whitelist Settings ---
-    private final Setting<List<Block>> whitelist = sgWhitelist.add(new BlockListSetting.Builder()
-        .name("blocks")
-        .description("Only click these blocks.")
-        .build()
-    );
-
-    // --- Render Settings ---
-    private final Setting<Boolean> render = sgRender.add(new BoolSetting.Builder()
-        .name("render")
-        .description("Renders a box around the blocks being clicked.")
-        .defaultValue(true)
-        .build()
-    );
-
-    private final Setting<SettingColor> sideColor = sgRender.add(new ColorSetting.Builder()
-        .name("side-color")
-        .description("The color of the sides of the box.")
-        .defaultValue(new SettingColor(255, 0, 0, 75))
-        .build()
-    );
-
-    private final Setting<SettingColor> lineColor = sgRender.add(new ColorSetting.Builder()
-        .name("line-color")
-        .description("The color of the lines of the box.")
-        .defaultValue(new SettingColor(255, 0, 0, 255))
-        .build()
-    );
-
-    private final List<BlockPos> activeBlocks = new ArrayList<>();
+    private final List<BlockPos> blocksToClick = new ArrayList<>();
 
     public ModuleExample() {
-        // You can change "world-origin" to "click-aura" here if you want
-        super(Categories.World, "click-aura", "Bypasses Nuker limits by sending single-click packets. Requires Haste.");
+        super(Categories.World, "click-aura", "Instant-break packet spammer for high Haste.");
     }
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
-        activeBlocks.clear();
-        int count = 0;
+        blocksToClick.clear();
         BlockPos p = mc.player.getBlockPos();
+        Vec3d eyePos = mc.player.getEyePos();
 
-        // Box iteration logic
-        for (int x = -horizontalRadius.get(); x <= horizontalRadius.get(); x++) {
-            for (int z = -horizontalRadius.get(); z <= horizontalRadius.get(); z++) {
-                for (int y = -verticalDown.get(); y <= verticalUp.get(); y++) {
-                    
-                    if (count >= bpt.get()) return;
-
+        // 1. Find all matching blocks in the box
+        for (int x = -hRadius.get(); x <= hRadius.get(); x++) {
+            for (int z = -hRadius.get(); z <= hRadius.get(); z++) {
+                for (int y = -vDown.get(); y <= vUp.get(); y++) {
                     BlockPos targetPos = p.add(x, y, z);
-                    Block block = mc.world.getBlockState(targetPos).getBlock();
+                    BlockState state = mc.world.getBlockState(targetPos);
 
-                    // Only target whitelisted blocks
-                    if (whitelist.get().contains(block)) {
-                        activeBlocks.add(targetPos);
-                        
-                        if (rotate.get()) {
-                            Rotations.rotate(Rotations.getYaw(targetPos), Rotations.getPitch(targetPos), () -> clickBlock(targetPos));
-                        } else {
-                            clickBlock(targetPos);
-                        }
-                        
-                        count++;
+                    if (!state.isAir() && whitelist.get().contains(state.getBlock())) {
+                        blocksToClick.add(targetPos);
                     }
                 }
             }
         }
+
+        // 2. SORT by distance (closest first) - This is the "ASAP" logic
+        blocksToClick.sort(Comparator.comparingDouble(pos -> Vec3d.ofCenter(pos).squaredDistanceTo(eyePos)));
+
+        // 3. BLAST the packets
+        int count = 0;
+        for (BlockPos pos : blocksToClick) {
+            if (count >= bpt.get()) break;
+
+            if (rotate.get()) {
+                Rotations.rotate(Rotations.getYaw(pos), Rotations.getPitch(pos), () -> click(pos));
+            } else {
+                click(pos);
+            }
+            count++;
+        }
     }
 
-    private void clickBlock(BlockPos pos) {
-        // Sends the attack/start-break packet
+    private void click(BlockPos pos) {
+        // Direct attack packet - no waiting, no delay logic.
         mc.interactionManager.attackBlock(pos, Direction.UP);
     }
 
     @EventHandler
     private void onRender(Render3DEvent event) {
-        if (!render.get() || activeBlocks.isEmpty()) return;
-        
-        for (BlockPos pos : activeBlocks) {
+        if (!render.get() || blocksToClick.isEmpty()) return;
+        int count = 0;
+        for (BlockPos pos : blocksToClick) {
+            if (count >= bpt.get()) break;
             event.renderer.box(pos, sideColor.get(), lineColor.get(), ShapeMode.Both, 0);
+            count++;
         }
     }
 }
