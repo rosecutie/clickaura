@@ -16,7 +16,7 @@ import net.minecraft.util.math.Direction;
 import java.util.ArrayList;
 import java.util.List;
 
-public class ClickerAura extends Module {
+public class ModuleExample extends Module {
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
     private final SettingGroup sgRender = settings.createGroup("Render");
     private final SettingGroup sgWhitelist = settings.createGroup("Whitelist");
@@ -93,7 +93,7 @@ public class ClickerAura extends Module {
 
     private final List<BlockPos> activeBlocks = new ArrayList<>();
 
-    public ClickerAura() {
+    public ModuleExample() {
         // You can change "world-origin" to "click-aura" here if you want
         super(Categories.World, "click-aura", "Bypasses Nuker limits by sending single-click packets. Requires Haste.");
     }
