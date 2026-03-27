@@ -11,6 +11,7 @@ import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
+import net.minecraft.block.Blocks;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
@@ -35,24 +36,24 @@ public class ModuleExample extends Module {
     private final Setting<SettingColor> lineColor = sgRender.add(new ColorSetting.Builder().name("line-color").defaultValue(new SettingColor(255, 0, 0, 255)).build());
 
     private final List<BlockPos> blocksToClick = new ArrayList<>();
+    private final List<BlockPos> clickedThisTick = new ArrayList<>();
 
     public ModuleExample() {
-        super(Categories.World, "click-aura", "Instant-break packet spammer for high Haste.");
+        super(Categories.World, "click-aura", "Instant-break packet spammer. Set blocks in Whitelist.");
     }
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
         blocksToClick.clear();
+        clickedThisTick.clear();
         BlockPos p = mc.player.getBlockPos();
         Vec3d eyePos = mc.player.getEyePos();
 
-        // 1. Find all matching blocks in the box
         for (int x = -hRadius.get(); x <= hRadius.get(); x++) {
             for (int z = -hRadius.get(); z <= hRadius.get(); z++) {
                 for (int y = -vDown.get(); y <= vUp.get(); y++) {
                     BlockPos targetPos = p.add(x, y, z);
                     BlockState state = mc.world.getBlockState(targetPos);
-
                     if (!state.isAir() && whitelist.get().contains(state.getBlock())) {
                         blocksToClick.add(targetPos);
                     }
@@ -60,36 +61,32 @@ public class ModuleExample extends Module {
             }
         }
 
-        // 2. SORT by distance (closest first) - This is the "ASAP" logic
         blocksToClick.sort(Comparator.comparingDouble(pos -> Vec3d.ofCenter(pos).squaredDistanceTo(eyePos)));
 
-        // 3. BLAST the packets
         int count = 0;
         for (BlockPos pos : blocksToClick) {
             if (count >= bpt.get()) break;
-
             if (rotate.get()) {
                 Rotations.rotate(Rotations.getYaw(pos), Rotations.getPitch(pos), () -> click(pos));
             } else {
                 click(pos);
             }
+            clickedThisTick.add(pos);
             count++;
         }
     }
 
     private void click(BlockPos pos) {
-        // Direct attack packet - no waiting, no delay logic.
         mc.interactionManager.attackBlock(pos, Direction.UP);
+        // FORCE client-side air to prevent ghost blocks
+        mc.world.setBlockState(pos, Blocks.AIR.getDefaultState());
     }
 
     @EventHandler
     private void onRender(Render3DEvent event) {
-        if (!render.get() || blocksToClick.isEmpty()) return;
-        int count = 0;
-        for (BlockPos pos : blocksToClick) {
-            if (count >= bpt.get()) break;
+        if (!render.get() || clickedThisTick.isEmpty()) return;
+        for (BlockPos pos : clickedThisTick) {
             event.renderer.box(pos, sideColor.get(), lineColor.get(), ShapeMode.Both, 0);
-            count++;
         }
     }
 }
